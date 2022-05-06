@@ -1,6 +1,8 @@
+import os
 from enum import Enum, auto
 
 import dash
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -8,7 +10,7 @@ from dash import dash_table as dt
 from dash import dcc as dcc
 from dash import html as html
 from dash.dependencies import Input, Output
-import os
+from plotly.colors import n_colors
 
 dt_idx = 4
 qtr_fmt = "Q%q %Y"
@@ -17,13 +19,16 @@ df = pd.read_csv(os.path.join(os.path.dirname(__file__), 'breach_report_archived
                  parse_dates=[dt_idx])
 
 qtrcol_nm = 'submit_qtr'
+submit_year = 'submit_year'
 col_typof_breach_idx = 5
 col_loc_breach_idx = 6
+col_cov_ent_type = 2
 
 df.iloc[:, [col_typof_breach_idx, col_loc_breach_idx]].fillna(' ')
 df['id'] = df.index
 df.set_index('id')
 df[qtrcol_nm] = df.iloc[:, dt_idx].dt.to_period("Q")
+df[submit_year] = df.iloc[:, dt_idx].dt.strftime("%Y")
 df = df.sort_values(by=qtrcol_nm, ascending=True)
 df[qtrcol_nm] = df[qtrcol_nm].dt.strftime(qtr_fmt)
 
@@ -31,7 +36,7 @@ uniq_submit_dates = pd.Series(df[qtrcol_nm].unique())
 uniq_typeof_breach = df.iloc[:, col_typof_breach_idx].str.split(',|/').explode().dropna().unique()
 uniq_loc_breach_idx = df.iloc[:, col_loc_breach_idx].str.split(',|/').explode().dropna().unique()
 
-colMap = list(enumerate(filter(lambda _c: _c not in ('id', qtrcol_nm), df.columns)))
+colMap = list(enumerate(filter(lambda _c: _c not in ('id', qtrcol_nm, submit_year), df.columns)))
 
 # dont' sort tab_df, otherwise filter logic will break!!
 tab_df = df.copy()
@@ -248,7 +253,7 @@ app.layout = html.Div([
     , html.Br()
     , html.Div(id='graphs-placeholder-container')
     ,
-    html.H5('-> References -- Data Sources.',
+    html.H5('-> References',
             style={'fontSize': 30, 'textAlign': 'left', 'color': 'MidnightBlue'}),
     html.Div([
         html.A("> HHS Breach Reported Data.",
@@ -260,8 +265,14 @@ app.layout = html.Div([
         html.A("> Dash Table",
                href="https://dash.plotly.com/datatable/interactivity"),
         html.Br(),
-        html.A("⦿ Color.",
-               href="https://htmlcolorcodes.com/color-names/")
+        html.A("> Color.",
+               href="https://htmlcolorcodes.com/color-names/"),
+        html.Br(),
+        html.A("> Plotly Bug Tackled.",
+            href="https://github.com/numpy/numpy/issues/21008"),
+        html.Br(),
+        html.A("> Hacking Statistics",
+               "https://review42.com/resources/hacking-statistics/")
     ])
 
 ])
@@ -287,7 +298,7 @@ def get_col_from_filter_col_order(idx):
     if idx == 0:  # State
         return 1
     elif idx == 1:  # Covered Entity Type
-        return 2
+        return col_cov_ent_type
     elif idx == 2:  # Type of breach
         return col_typof_breach_idx
     elif idx == 3:  # loc of breach
@@ -422,9 +433,121 @@ def create_grp_bar_charts(_df):
             title="Average Individuals Effected Per State",
         )
             .update_layout(paper_bgcolor="#AFFAFF")
-            .update_traces(texttemplate="%{text:.2s}")\
             .update_xaxes(categoryorder='category ascending')
     ),
+        "", width="100%", display='inline-block')
+
+
+def create_annual_violin_plot(_df):
+    cov_ent_nm = colMap[col_cov_ent_type][1]
+    ac = colMap[3][1]
+
+    yr_df = _df.copy()
+    fig = go.Figure()
+
+    uniq_cov_ent = pd.unique(yr_df[cov_ent_nm])
+    colors = ["orange", "blue", "green", "yellow"]
+    uniq_yrs = pd.unique(yr_df[submit_year])
+    for _i, uce in enumerate(uniq_cov_ent):
+        print(yr_df[cov_ent_nm] == uce)
+        fig.add_trace(go.Violin(x=yr_df[submit_year][yr_df[cov_ent_nm] == uce],
+                                y=np.log(yr_df[ac][yr_df[cov_ent_nm] == uce]),
+                                legendgroup=repr(uce), scalegroup=repr(uce), name=repr(uce)
+                                )
+                      )
+
+    fig.update_traces(box_visible=True, meanline_visible=True)
+    fig.update_layout(violinmode='group').update_layout(paper_bgcolor="#AFFAFF")
+
+    return ControlType.wrap(dcc.Graph(
+        id="x2",
+        figure=fig),
+        "", width="100%", display='inline-block')
+
+
+def discard_create_annual_violin_plot(_df):
+    ac = colMap[3][1]
+
+    yr_df = _df.copy()
+    yr = yr_df.groupby(['State', submit_year])[ac].sum().unstack(fill_value=0)
+    colors = n_colors('rgb(5, 200, 200)', 'rgb(200, 10, 10)', 12, colortype='rgb')
+
+    fig = go.Figure()
+    for data_line, color in zip(yr, colors):
+        fig.add_trace(go.Violin(x=yr[data_line], line_color=color))
+
+    fig.update_traces(orientation='h', side='positive', width=3, points=False)
+    fig.update_layout(xaxis_showgrid=False, xaxis_zeroline=False)
+
+    return ControlType.wrap(dcc.Graph(
+        id="x2_1",
+        figure=fig),
+        "", width="100%", display='inline-block')
+
+
+def create_pie_chart_1(_df):
+    ac = colMap[3][1]
+
+    yr_df = _df.copy()
+    yr_df = yr_df.assign(
+        loc_of_breach=yr_df.iloc[:, col_loc_breach_idx].str.split('\\/|,')\
+                                .fillna('').map(lambda x: [aa.strip() for aa in x])
+    ).explode('loc_of_breach')
+
+    yr_df = yr_df.groupby(['loc_of_breach'])[ac].mean()
+
+    # issue #835. Will fail in debugger, see Bugs in the references section here.
+    # yr_df = yr_df.unstack(level=1, fill_value=0)
+    yr_df = pd.DataFrame(yr_df.reset_index(['loc_of_breach']))
+
+    yr_df = yr_df.round(2).rename(columns={"Unknown": ac})
+    yr_df[ac] = np.log(yr_df[ac])
+
+    # fig = px.violin(yr_df, x="explode_loc_breach", y=ac, color="explode_typof_breach")
+    fig = px.pie(yr_df, values=ac, names='loc_of_breach',
+                 labels={
+                            'loc_of_breach': 'Location Of Breach'
+                        },
+                 title="Average Individual effected Per Location of Breach")
+    fig.update_layout(paper_bgcolor="#AFFAFF")\
+        .update_traces(textposition='inside', textinfo='percent+label')
+
+    return ControlType.wrap(dcc.Graph(
+        id="x3",
+        figure=fig),
+        "", width="50%", display='inline-block')
+
+
+def create_pie_chart_2(_df):
+    ac = colMap[3][1]
+
+    yr_df = _df.copy()
+
+    yr_df = yr_df.assign(
+        type_of_breach=yr_df.iloc[:, col_typof_breach_idx].str.split('\\/|,')\
+                                .fillna('').map(lambda x: [aa.strip() for aa in x])
+    ).explode('type_of_breach')
+
+    yr_df = yr_df.groupby(['type_of_breach'])[ac].mean()
+
+    yr_df = pd.DataFrame(yr_df.reset_index(['type_of_breach']))
+
+    yr_df = yr_df.round(2).rename(columns={"Unknown": ac})
+    yr_df[ac] = np.log(yr_df[ac])
+
+    # fig = px.violin(yr_df, x="explode_loc_breach", y=ac, color="explode_typof_breach")
+    fig = px.pie(yr_df, values=ac, names='type_of_breach',
+                 # hover_data = ['type_of_breach'], labels = {
+                 labels={
+                     'type_of_breach': 'Type Of Breach'
+                 },
+                 title="Average Individual effected Per Type of Breach")
+    fig.update_layout(paper_bgcolor="#AFFAFF")\
+        .update_traces(textposition='inside', textinfo='percent+label')
+
+    return ControlType.wrap(dcc.Graph(
+        id="x4",
+        figure=fig),
         "", width="50%", display='inline-block')
 
 
@@ -436,13 +559,19 @@ def create_grp_bar_charts(_df):
 def update_graphs(row_ids, selected_row_ids, active_cell):
     selected = set(selected_row_ids or [])
     if row_ids is not None:
-        dff = tab_df.loc[row_ids]
+        dff = tab_df.copy(deep=True).loc[row_ids]
     else:
-        dff = tab_df
+        dff = tab_df.copy(deep=True)
 
     cur_row = active_cell['row_id'] if active_cell else None
 
-    return [create_grp_bar_charts(dff)]
+    return [
+            create_pie_chart_1(dff),
+            create_pie_chart_2(dff),
+            create_grp_bar_charts(dff),
+            # create_annual_violin_plot(dff),
+            create_annual_violin_plot(dff)
+            ]
 
 
 if __name__ == '__main__':
