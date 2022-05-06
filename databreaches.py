@@ -2,23 +2,66 @@ from enum import Enum, auto
 
 import dash
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from dash import dash_table as dt
 from dash import dcc as dcc
 from dash import html as html
 from dash.dependencies import Input, Output
-
-external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
-
-app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
+import os
 
 dt_idx = 4
 qtr_fmt = "Q%q %Y"
 
-df = pd.read_csv('/Users/soubhik1c/Downloads/MA705/personal-project/breach_report_archived.csv', parse_dates=[dt_idx])
+df = pd.read_csv(os.path.join(os.path.dirname(__file__), 'breach_report_archived.csv'),
+                 parse_dates=[dt_idx])
 
-colMap = list(enumerate(df.columns))
-df['submit_qtr'] = df.iloc[:, dt_idx].dt.to_period("Q").dt.strftime(qtr_fmt)
-submit_dates = pd.Series(df.iloc[:, dt_idx].dt.to_period("Q").sort_values(ascending=True).
-                         dt.strftime(qtr_fmt).unique())
+qtrcol_nm = 'submit_qtr'
+col_typof_breach_idx = 5
+col_loc_breach_idx = 6
+
+df.iloc[:, [col_typof_breach_idx, col_loc_breach_idx]].fillna(' ')
+df['id'] = df.index
+df.set_index('id')
+df[qtrcol_nm] = df.iloc[:, dt_idx].dt.to_period("Q")
+df = df.sort_values(by=qtrcol_nm, ascending=True)
+df[qtrcol_nm] = df[qtrcol_nm].dt.strftime(qtr_fmt)
+
+uniq_submit_dates = pd.Series(df[qtrcol_nm].unique())
+uniq_typeof_breach = df.iloc[:, col_typof_breach_idx].str.split(',|/').explode().dropna().unique()
+uniq_loc_breach_idx = df.iloc[:, col_loc_breach_idx].str.split(',|/').explode().dropna().unique()
+
+colMap = list(enumerate(filter(lambda _c: _c not in ('id', qtrcol_nm), df.columns)))
+
+# dont' sort tab_df, otherwise filter logic will break!!
+tab_df = df.copy()
+tab_df.dropna(inplace=True)
+tab_df[colMap[dt_idx][1]] = tab_df.iloc[:, dt_idx].dt.strftime("%b %d, %y")
+tool_tip_df = df.iloc[:, [0, 8]]
+tab_df['qcut'], labs = pd.qcut(tab_df.iloc[:, 3], q=10, labels=False, retbins=True)
+tab_df.set_index('id')
+
+drop_enable = [8]
+
+tab_cols_fmt = []
+colMap_columns = list(map(lambda cm: cm[1], colMap))
+for i, c in enumerate([_c for _c in tab_df.columns if _c in colMap_columns]):
+    base = dict(id=c, name=c)
+    # enable filters
+    if i in (0, 3, 8):
+        base['filter_options'] = dict(filter_action='native')
+
+    # enable deletable
+    if i in (8,):
+        base['deletable'] = True
+        base['hideable'] = True
+
+    if i in (1,):
+        base['presentation'] = 'dropdown'
+
+    tab_cols_fmt.append(base)
+
+filter_col_obj_ids = {}
 
 
 class ControlType(Enum):
@@ -31,12 +74,13 @@ class ControlType(Enum):
         _, col_name = col_info
         return prefix + control_name.lower() + "_" + col_name.replace(" ", "_").lower()
 
-    def wrap(self, o, label, **kwargs):
+    @classmethod
+    def wrap(cls, o, label, **kwargs):
         return html.Div([
             html.Label(f"{str(label).strip()}", title=label, style=label_style)
             , o
         ],
-            style=dict(width=kwargs["width"])
+            style=kwargs
         )
 
     def get_control_obj(self, col_info, **kwargs):
@@ -45,23 +89,31 @@ class ControlType(Enum):
         _id = ControlType.get_id(self.name, col_info)
         col = col_id
         control_obj = None
+        if col_id == col_loc_breach_idx:
+            dd_opt = uniq_loc_breach_idx
+        elif col_id == col_typof_breach_idx:
+            dd_opt = uniq_typeof_breach
+        else:
+            dd_opt = df.iloc[:, col].fillna('').unique()
         if ct == self.DropDown.value:
             control_obj = dcc.Dropdown(
                 id=_id,
                 options={
                     str(b).strip(): str(b).strip()
-                    for b in sorted(df.iloc[:, col].fillna('').unique())
+                    for b in sorted(dd_opt)
                 },
-                value=df.iloc[0, col],
-                clearable=False
+                # value=df.iloc[0, col],
+                clearable=True,
+                multi=True,
             )
+            filter_col_obj_ids[_id] = "value"
         elif ct == self.RangeSlider.value:
             control_obj = dcc.RangeSlider(id=_id,
                                           min=0,
-                                          max=len(submit_dates),
-                                          value=[0, len(submit_dates) - 1],
+                                          max=len(uniq_submit_dates),
+                                          value=[0, len(uniq_submit_dates) - 1],
                                           marks={each: {"label": str(date), "style": {"transform": "rotate(45deg)"}}
-                                                 for each, date in enumerate(submit_dates)},
+                                                 for each, date in enumerate(uniq_submit_dates)},
                                           step=None)
         elif ct == self.DatePickerRange.value:
             control_obj = dcc.DatePickerRange(
@@ -70,8 +122,11 @@ class ControlType(Enum):
                 end_date=df.iloc[:, col].max().date(),
                 min_date_allowed=df.iloc[:, col].min().date(),
                 max_date_allowed=df.iloc[:, col].max().date(),
+                number_of_months_shown=3,
+                day_size=30,
                 display_format='MMM YYYY, Do'
             )
+            filter_col_obj_ids[_id] = ("start_date", "end_date")
 
         if control_obj is not None:
             return self.wrap(control_obj, col_name, **kwargs)
@@ -83,12 +138,12 @@ input_1 = (
     (colMap[1], ControlType.DropDown, dict(width="6%"))
     , (colMap[2], ControlType.DropDown, dict(width="16%"))
     , (colMap[dt_idx], ControlType.DatePickerRange, dict(width="21%"))
-    , (colMap[5], ControlType.DropDown, dict(width="16%"))
+    , (colMap[5], ControlType.DropDown, dict(width="25%"))
     , (colMap[6], ControlType.DropDown, dict(width="20%"))
     , (colMap[7], ControlType.DropDown, dict(width="14%"))
 )
 
-input_2 = ((colMap[dt_idx], ControlType.RangeSlider, dict(width="100%")),)
+input_2 = ((colMap[dt_idx], ControlType.RangeSlider, dict(width="99%")),)
 
 # df.iloc[:, 4] = pd.to_datetime(df.iloc[:, 4])
 
@@ -122,25 +177,14 @@ intro = dcc.Markdown(
         All healthcare data breaches in the U.S. up to 9/14/2021 from the U.S. Dept. of HHS Office 
         for Civil Rights portal.
     ''')
-#
-# set1 = {
-#     # "Covered Entity": (0, ControlType.DropDown, "35%", "Name of Covered Entity")
-#     "State": (1, ControlType.DropDown, "6%", "State")
-#     , "Entity Type": (2, ControlType.DropDown, "16%", "Covered Entity Type")
-#     , "Submission Date": (4, ControlType.DatePickerRange, "21%", "Breach Submission Date")
-#     # , "Affected": (3, ControlType.DropDown, "10%", "Individuals Affected")
-#     , "Breach Type": (5, ControlType.DropDown, "16%", "Type of Breach")
-#     , "Location": (6, ControlType.DropDown, "11%", "Location Breached")
-#     , "Assoc. Present": (7, ControlType.DropDown, "11%", "Business Associate Present")
-# }
-#
-# set2 = {
-#     "Submission Range": (4, ControlType.RangeSlider, "100%", "Breach Submission Date")
-# }
+
+
+app = dash.Dash(__name__,
+                external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css']
+                )
 
 app.layout = html.Div([
     h1
-    # , html.Div([html.P("-" * 80)])
     , h2
     , intro
     , html.Div(children=[
@@ -157,16 +201,148 @@ app.layout = html.Div([
         style=dict(display='flex')
     )
     , html.Br()
+    , html.Div(children=[
+
+        dt.DataTable(id='breaches_table',
+                     css=[{
+                         'selector': '.dash-spreadsheet td div',
+                         'rule': '''
+                                max-height: 30px; min-height: 30px; height: 30px;
+                                max-width: 350px; overflow: hidden;
+                                text-align: left; text-overflow: ellipsis;
+                                display: block;
+                            '''
+                     }],
+                     tooltip_data=[
+                         {
+                             column: {'value': str(value), 'type': 'markdown'}
+                             for column, value in row.items()
+                         } for row in tool_tip_df.to_dict('records')
+                     ],
+                     tooltip_duration=None,
+                     style_table=dict(height="300px"),
+                     style_data={
+                         'whiteSpace': 'normal',
+                         'lineHeight': '15px'
+                     },
+                     # style_cell={'textAlign': 'left',
+                     #             'overflow': 'hidden',
+                     #             'textOverflow': 'ellipsis',
+                     #             'lineHeight': '15px',
+                     #             'maxWidth': 100
+                     #             },
+                     filter_action="native",
+                     sort_action="native",
+                     sort_mode="multi",
+                     page_action="native",
+                     page_current=0,
+                     page_size=25,
+                     fixed_rows={'headers': True},
+                     # style_table={'height': 400, 'overflowY': 'auto'},
+                     columns=tab_cols_fmt,
+                     data=tab_df.to_dict('records'),
+                     ),
+    ],
+        style=dict(height="10%")
+    )
+    , html.Br()
+    , html.Div(id='graphs-placeholder-container')
     ,
+    html.H5('-> References -- Data Sources.',
+            style={'fontSize': 30, 'textAlign': 'left', 'color': 'MidnightBlue'}),
+    html.Div([
+        html.A("> HHS Breach Reported Data.",
+               href='https://ocrportal.hhs.gov/ocr/breach/breach_report.jsf'),
+        html.Br(),
+        html.A("> Graphs",
+               href='https://plotly.com/python/categorical-axes/'),
+        html.Br(),
+        html.A("> Dash Table",
+               href="https://dash.plotly.com/datatable/interactivity"),
+        html.Br(),
+        html.A("⦿ Color.",
+               href="https://htmlcolorcodes.com/color-names/")
+    ])
 
 ])
-
 
 submit_dt_picker_id = ControlType.get_id(ControlType.DatePickerRange.name,
                                          colMap[dt_idx])
 
 submit_rg_slider_id = ControlType.get_id(ControlType.RangeSlider.name,
                                          colMap[dt_idx])
+
+
+def get_all_filters():
+    a1 = [Input(fid, "value")
+          for fid in filter_col_obj_ids
+          if isinstance(filter_col_obj_ids[fid], str)
+          ]
+    a1.append(Input(submit_dt_picker_id, "start_date"))
+    a1.append(Input(submit_dt_picker_id, "end_date"))
+    return a1
+
+
+def get_col_from_filter_col_order(idx):
+    if idx == 0:  # State
+        return 1
+    elif idx == 1:  # Covered Entity Type
+        return 2
+    elif idx == 2:  # Type of breach
+        return col_typof_breach_idx
+    elif idx == 3:  # loc of breach
+        return col_loc_breach_idx
+    elif idx == 4:  # business assoc present
+        return 7
+    elif idx in (5, 6):  # submission date
+        return dt_idx
+    else:
+        return -100
+
+
+@app.callback(
+    Output("breaches_table", "data"),
+    get_all_filters()
+)
+def update_breaches_table(*args):
+    print(args)
+    start_dt = args[5]
+    end_dt = args[6]
+    # print(f"start {start_dt} to {end_dt}")
+
+    # first apply a date which is always not-null.
+    filtered_data = tab_df.loc[
+        (df.iloc[:, dt_idx] >= start_dt)
+        & (df.iloc[:, dt_idx] < end_dt)
+        ]
+    # print(len(filtered_data.iloc[:, 0]))
+
+    for idx, _a in enumerate(args):
+        if idx >= 5:
+            continue
+
+        col_info = colMap[get_col_from_filter_col_order(idx)]
+        cidx, col_nm = col_info
+
+        if cidx in (col_typof_breach_idx, col_loc_breach_idx) and _a is not None:
+            print(f"{col_nm} >- {_a}")
+            regex = ' | '.join(_va
+                               for _va in _a if len(_va.strip()) > 0)
+            if len(regex.strip()) > 0:
+                filtered_data = filtered_data.loc[
+                    filtered_data.iloc[:, cidx].str.contains(regex.strip(), regex=True)
+                ]
+
+        elif cidx < 5 and _a is not None:
+            print(f"{col_nm} <- {_a}")
+            q_str = ' | '.join(f'`{col_nm}` == {repr(_va)}'
+                               for _va in _a if len(_va.strip()) > 0)
+            if len(q_str.strip()) > 0:
+                filtered_data = filtered_data.query(q_str)
+    # print(len(filtered_data.iloc[:, 0]))
+    # print(filtered_data.columns)
+    filtered_data.set_index('id')
+    return filtered_data.to_dict('records')
 
 
 @app.callback(
@@ -181,7 +357,7 @@ submit_rg_slider_id = ControlType.get_id(ControlType.RangeSlider.name,
 def update_date_picker_range_submit_date_end(start_date, end_date, range_slider_value):
     def get_index(x):
         search = pd.to_datetime(x).to_period("Q").strftime(qtr_fmt)
-        return submit_dates[submit_dates == search].index
+        return uniq_submit_dates[uniq_submit_dates == search].index
 
     ctx = dash.callback_context
     trigger = ctx.triggered[0]["prop_id"].split(".")
@@ -191,10 +367,11 @@ def update_date_picker_range_submit_date_end(start_date, end_date, range_slider_
     lwr_r, upr_r = range_slider_value
 
     if trig_ctrl == submit_rg_slider_id:
-        lwr_limit = submit_dates[lwr_r]
-        lwr_v = df[df.submit_qtr == lwr_limit].iloc[:, dt_idx].min().strftime("%Y-%m-%d")
-        upr_limit = submit_dates[upr_r]
-        upr_v = df[df.submit_qtr == upr_limit].iloc[:, dt_idx].max().strftime("%Y-%m-%d")
+        lwr_limit = uniq_submit_dates[lwr_r]
+        df_qtr_str = df[qtrcol_nm]  # .dt.strftime(qtr_fmt)
+        lwr_v = df[df_qtr_str == lwr_limit].iloc[:, dt_idx].min().strftime("%Y-%m-%d")
+        upr_limit = uniq_submit_dates[upr_r]
+        upr_v = df[df_qtr_str == upr_limit].iloc[:, dt_idx].max().strftime("%Y-%m-%d")
     elif trig_field == 'start_date':
         assert trig_ctrl == submit_dt_picker_id, f"{trig_ctrl} != {submit_dt_picker_id}"
         lwr_r = get_index(start_date).min()
@@ -204,6 +381,68 @@ def update_date_picker_range_submit_date_end(start_date, end_date, range_slider_
         upr_r = get_index(end_date).max()
 
     return lwr_v, upr_v, (lwr_r, upr_r)
+
+
+def create_heat_map(_df):
+    return go.Figure(data=go.Heatmap(
+        z=_df[4],
+        x=_df[dt_idx],
+        y=_df[1],
+        colorscale='Viridis'))
+
+
+def create_grp_bar_charts(_df):
+    gc = colMap[1][1]
+    ac = colMap[3][1]
+    yv = pd.DataFrame(
+        _df.groupby([gc, qtrcol_nm]) \
+            .agg({ac: ['mean', 'std']}) \
+            .xs(ac, axis=1, drop_level=True)
+    )
+    yv = pd.DataFrame(yv.reset_index([gc, qtrcol_nm]))
+    yv = yv\
+        .round(2).rename(columns={"mean": ac})
+    # yv[qtrcol_nm] = yv.loc[:, qtrcol_nm].dt.strftime(qtr_fmt)
+    # yv[ac] = yv["mean"]
+    return ControlType.wrap(dcc.Graph(
+        id="x1",
+        figure=px.bar(
+            yv,
+            x=gc,
+            y=ac,
+            log_y=True,
+            error_y=yv["std"],
+            # text=yv["mean"].map('{:,.0f}K'.format),
+            color=yv[qtrcol_nm],
+            # barmode="group",
+            # facet_col="sex",
+            color_continuous_scale=px.colors.sequential.algae,
+            # color_continuous_midpoint=yv["mean"].mean(),
+            orientation="v",
+            title="Average Individuals Effected Per State",
+        )
+            .update_layout(paper_bgcolor="#AFFAFF")
+            .update_traces(texttemplate="%{text:.2s}")\
+            .update_xaxes(categoryorder='category ascending')
+    ),
+        "", width="50%", display='inline-block')
+
+
+@app.callback(
+    Output('graphs-placeholder-container', 'children'),
+    Input('breaches_table', 'derived_virtual_row_ids'),
+    Input('breaches_table', 'selected_row_ids'),
+    Input('breaches_table', 'active_cell'))
+def update_graphs(row_ids, selected_row_ids, active_cell):
+    selected = set(selected_row_ids or [])
+    if row_ids is not None:
+        dff = tab_df.loc[row_ids]
+    else:
+        dff = tab_df
+
+    cur_row = active_cell['row_id'] if active_cell else None
+
+    return [create_grp_bar_charts(dff)]
 
 
 if __name__ == '__main__':
