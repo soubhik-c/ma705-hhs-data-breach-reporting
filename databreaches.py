@@ -1,6 +1,7 @@
 import os
 from enum import Enum, auto
 
+import colorlover
 import dash
 import numpy as np
 import pandas as pd
@@ -18,8 +19,8 @@ qtr_fmt = "Q%q %Y"
 df = pd.read_csv(os.path.join(os.path.dirname(__file__), 'breach_report_archived.csv'),
                  parse_dates=[dt_idx])
 
-qtrcol_nm = 'submit_qtr'
-submit_year = 'submit_year'
+qtrcol_nm = 'Submission Qtr'
+submit_year = 'Submission Year'
 col_typof_breach_idx = 5
 col_loc_breach_idx = 6
 col_cov_ent_type = 2
@@ -43,7 +44,9 @@ tab_df = df.copy()
 tab_df.dropna(inplace=True)
 tab_df[colMap[dt_idx][1]] = tab_df.iloc[:, dt_idx].dt.strftime("%b %d, %y")
 tool_tip_df = df.iloc[:, [0, 8]]
-tab_df['qcut'], labs = pd.qcut(tab_df.iloc[:, 3], q=10, labels=False, retbins=True)
+q_bins = 10
+qcut_col = "Decile Cut"
+tab_df[qcut_col], labs = pd.qcut(tab_df.iloc[:, 3], q=q_bins, labels=False, retbins=True)
 tab_df.set_index('id')
 
 drop_enable = [8]
@@ -187,6 +190,44 @@ app = dash.Dash(__name__,
                 external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css']
                 )
 
+
+def quantile_based_table_highlight():
+    col_palette = colorlover.scales[str(12)]['qual']['Set3']
+
+    styles = []
+    legend = []
+    for cur_q in range(0, q_bins):
+        backgroundColor = col_palette[cur_q]
+        # color = 'white' if cur_q > q_bins / 2. else 'inherit'
+        color = 'inherit'
+        lwr_bound = tab_df[tab_df[qcut_col] == cur_q][colMap[3][1]].min()
+        styles.append({
+            'if': {
+                'filter_query': (
+                    '{{{qcut_col}}} = {qcut_val}'
+                ).format(qcut_col=qcut_col, qcut_val=cur_q),
+            },
+            'backgroundColor': backgroundColor,
+            'color': color
+        })
+        legend.append(
+            html.Div(style={'display': 'inline-block', 'width': '60px'}, children=[
+                html.Div(
+                    style={
+                        'backgroundColor': backgroundColor,
+                        'borderLeft': '1px rgb(50, 50, 50) solid',
+                        'height': '10px'
+                    }
+                ),
+                html.Small(round(lwr_bound, 2), style={'paddingLeft': '2px'})
+            ])
+        )
+
+    return styles, html.Div(legend, style={'padding': '5px 0 5px 0'})
+
+
+(styles, legend) = quantile_based_table_highlight()
+
 app.layout = html.Div([
     h1
     , h2
@@ -206,7 +247,7 @@ app.layout = html.Div([
     )
     , html.Br()
     , html.Div(children=[
-
+        html.Div(legend, style={'float': 'right'}, title="Decile based Individuals Effected"),
         dt.DataTable(id='breaches_table',
                      css=[{
                          'selector': '.dash-spreadsheet td div',
@@ -245,9 +286,11 @@ app.layout = html.Div([
                      # style_table={'height': 400, 'overflowY': 'auto'},
                      columns=tab_cols_fmt,
                      data=tab_df.to_dict('records'),
+                     style_data_conditional=styles
                      ),
     ],
         style=dict(height="10%")
+        ,title="Decile based Individuals Effected"
     )
     , html.Br()
     , html.Div(id='graphs-placeholder-container')
