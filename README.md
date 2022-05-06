@@ -35,8 +35,6 @@ git clone git@github.com:soubhik-c/ma705-hhs-data-breach-reporting.git
 
 - Create a python local virtual environment
 ```
-#!/bin/zsh
-
 cd ma705-hhs-data-breach-reporting
 python -m venv venv
 source ./venv/bin/activate
@@ -46,13 +44,9 @@ source ./venv/bin/activate
   Command prompt prefixed with ```(venv)```
 <img width="359" alt="image" src="https://user-images.githubusercontent.com/11516481/167076635-4b7b545a-dcca-4c38-9a2b-d677d00c2dcf.png">
 
-- Install dependent packages
+- Install dependent packages and start the app
 ```
 pip3 install -r requirements.txt
-```
-
-- Start the app
-```
 python3 ./databreaches.py
 ```
 
