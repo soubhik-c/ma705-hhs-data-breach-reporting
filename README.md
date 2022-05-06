@@ -30,13 +30,13 @@ We’ve prepared a list of jaw-dropping facts to prove it.
 - Checkout code
   Go to command terminal and clone the repo.
 ```
-git clone git@github.com:soubhik-c/ma705-hhs-data-breach-reporting.git
+git clone https://github.com/soubhik-c/ma705-hhs-data-breach-reporting.git
 ```
 
 - Create a python local virtual environment
 ```
 cd ma705-hhs-data-breach-reporting
-python -m venv venv
+python3 -m venv venv
 source ./venv/bin/activate
 
 ```
