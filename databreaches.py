@@ -183,7 +183,6 @@ intro = dcc.Markdown(
         for Civil Rights portal.
     ''')
 
-
 app = dash.Dash(__name__,
                 external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css']
                 )
@@ -269,10 +268,10 @@ app.layout = html.Div([
                href="https://htmlcolorcodes.com/color-names/"),
         html.Br(),
         html.A("> Plotly Bug Tackled.",
-            href="https://github.com/numpy/numpy/issues/21008"),
+               href="https://github.com/numpy/numpy/issues/21008"),
         html.Br(),
         html.A("> Hacking Statistics",
-               "https://review42.com/resources/hacking-statistics/")
+               href="https://review42.com/resources/hacking-statistics/")
     ])
 
 ])
@@ -316,7 +315,7 @@ def get_col_from_filter_col_order(idx):
     get_all_filters()
 )
 def update_breaches_table(*args):
-    print(args)
+    # print(args)
     start_dt = args[5]
     end_dt = args[6]
     # print(f"start {start_dt} to {end_dt}")
@@ -336,7 +335,7 @@ def update_breaches_table(*args):
         cidx, col_nm = col_info
 
         if cidx in (col_typof_breach_idx, col_loc_breach_idx) and _a is not None:
-            print(f"{col_nm} >- {_a}")
+            # print(f"{col_nm} >- {_a}")
             regex = ' | '.join(_va
                                for _va in _a if len(_va.strip()) > 0)
             if len(regex.strip()) > 0:
@@ -345,7 +344,7 @@ def update_breaches_table(*args):
                 ]
 
         elif cidx < 5 and _a is not None:
-            print(f"{col_nm} <- {_a}")
+            # print(f"{col_nm} <- {_a}")
             q_str = ' | '.join(f'`{col_nm}` == {repr(_va)}'
                                for _va in _a if len(_va.strip()) > 0)
             if len(q_str.strip()) > 0:
@@ -411,7 +410,7 @@ def create_grp_bar_charts(_df):
             .xs(ac, axis=1, drop_level=True)
     )
     yv = pd.DataFrame(yv.reset_index([gc, qtrcol_nm]))
-    yv = yv\
+    yv = yv \
         .round(2).rename(columns={"mean": ac})
     # yv[qtrcol_nm] = yv.loc[:, qtrcol_nm].dt.strftime(qtr_fmt)
     # yv[ac] = yv["mean"]
@@ -449,7 +448,7 @@ def create_annual_violin_plot(_df):
     colors = ["orange", "blue", "green", "yellow"]
     uniq_yrs = pd.unique(yr_df[submit_year])
     for _i, uce in enumerate(uniq_cov_ent):
-        print(yr_df[cov_ent_nm] == uce)
+        # print(yr_df[cov_ent_nm] == uce)
         fig.add_trace(go.Violin(x=yr_df[submit_year][yr_df[cov_ent_nm] == uce],
                                 y=np.log(yr_df[ac][yr_df[cov_ent_nm] == uce]),
                                 legendgroup=repr(uce), scalegroup=repr(uce), name=repr(uce)
@@ -490,8 +489,8 @@ def create_pie_chart_1(_df):
 
     yr_df = _df.copy()
     yr_df = yr_df.assign(
-        loc_of_breach=yr_df.iloc[:, col_loc_breach_idx].str.split('\\/|,')\
-                                .fillna('').map(lambda x: [aa.strip() for aa in x])
+        loc_of_breach=yr_df.iloc[:, col_loc_breach_idx].str.split('\\/|,') \
+            .fillna('').map(lambda x: [aa.strip() for aa in x])
     ).explode('loc_of_breach')
 
     yr_df = yr_df.groupby(['loc_of_breach'])[ac].mean()
@@ -506,10 +505,10 @@ def create_pie_chart_1(_df):
     # fig = px.violin(yr_df, x="explode_loc_breach", y=ac, color="explode_typof_breach")
     fig = px.pie(yr_df, values=ac, names='loc_of_breach',
                  labels={
-                            'loc_of_breach': 'Location Of Breach'
-                        },
+                     'loc_of_breach': 'Location Of Breach'
+                 },
                  title="Average Individual effected Per Location of Breach")
-    fig.update_layout(paper_bgcolor="#AFFAFF")\
+    fig.update_layout(paper_bgcolor="#AFFAFF") \
         .update_traces(textposition='inside', textinfo='percent+label')
 
     return ControlType.wrap(dcc.Graph(
@@ -524,8 +523,8 @@ def create_pie_chart_2(_df):
     yr_df = _df.copy()
 
     yr_df = yr_df.assign(
-        type_of_breach=yr_df.iloc[:, col_typof_breach_idx].str.split('\\/|,')\
-                                .fillna('').map(lambda x: [aa.strip() for aa in x])
+        type_of_breach=yr_df.iloc[:, col_typof_breach_idx].str.split('\\/|,') \
+            .fillna('').map(lambda x: [aa.strip() for aa in x])
     ).explode('type_of_breach')
 
     yr_df = yr_df.groupby(['type_of_breach'])[ac].mean()
@@ -542,7 +541,7 @@ def create_pie_chart_2(_df):
                      'type_of_breach': 'Type Of Breach'
                  },
                  title="Average Individual effected Per Type of Breach")
-    fig.update_layout(paper_bgcolor="#AFFAFF")\
+    fig.update_layout(paper_bgcolor="#AFFAFF") \
         .update_traces(textposition='inside', textinfo='percent+label')
 
     return ControlType.wrap(dcc.Graph(
@@ -566,12 +565,12 @@ def update_graphs(row_ids, selected_row_ids, active_cell):
     cur_row = active_cell['row_id'] if active_cell else None
 
     return [
-            create_pie_chart_1(dff),
-            create_pie_chart_2(dff),
-            create_grp_bar_charts(dff),
-            # create_annual_violin_plot(dff),
-            create_annual_violin_plot(dff)
-            ]
+        create_pie_chart_1(dff),
+        create_pie_chart_2(dff),
+        create_grp_bar_charts(dff),
+        # create_annual_violin_plot(dff),
+        create_annual_violin_plot(dff)
+    ]
 
 
 if __name__ == '__main__':
